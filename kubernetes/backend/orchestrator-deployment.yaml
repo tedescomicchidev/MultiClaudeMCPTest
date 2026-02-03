@@ -31,10 +31,16 @@ spec:
                 secretKeyRef:
                   name: anthropic-api-key
                   key: api-key
-            # WORKSPACE_PATH must be the hostPath on Minikube node
-            # This path is used by 'docker run -v' and must be accessible from Docker host
+            # WORKSPACE_PATH is the HOST machine path for 'docker run -v'
+            # Must match HOST_WORKSPACE used in minikube mount
             - name: WORKSPACE_PATH
-              value: "/data/claude-workspace"
+              valueFrom:
+                configMapKeyRef:
+                  name: workspace-config
+                  key: DOCKER_HOST_WORKSPACE
+            # WORKSPACE_LOCAL is where workspace is mounted inside this pod
+            - name: WORKSPACE_LOCAL
+              value: "/workspace"
             - name: DOCKER_MCP_IMAGE
               value: "claude-mcp:latest"
             - name: PORT

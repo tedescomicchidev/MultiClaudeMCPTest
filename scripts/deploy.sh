@@ -13,6 +13,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 K8S_DIR="$PROJECT_ROOT/kubernetes"
 
+# Workspace configuration
+# HOST_WORKSPACE: Path on your actual machine (Mac/Linux) - used by docker run -v
+# MINIKUBE_WORKSPACE: Path inside Minikube VM - used by pod hostPath
+HOST_WORKSPACE="${HOST_WORKSPACE:-$HOME/claude-workspace}"
+MINIKUBE_WORKSPACE="/data/claude-workspace"
+
 # Check if minikube is running
 if ! minikube status | grep -q "Running"; then
     echo "Error: Minikube is not running. Please start it with 'minikube start'"
@@ -25,6 +31,11 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
     echo "Please set it with: export ANTHROPIC_API_KEY='your-api-key'"
     exit 1
 fi
+
+# Create host workspace directory
+echo ""
+echo "Creating host workspace directory: $HOST_WORKSPACE"
+mkdir -p "$HOST_WORKSPACE"
 
 # Create namespaces
 echo ""
@@ -44,6 +55,22 @@ echo ""
 echo "Creating MCP settings ConfigMap..."
 kubectl apply -f "$K8S_DIR/backend/configmap.yaml"
 
+# Create workspace config with the correct host path
+echo ""
+echo "Creating workspace configuration..."
+echo "  Host workspace: $HOST_WORKSPACE"
+echo "  Minikube workspace: $MINIKUBE_WORKSPACE"
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workspace-config
+  namespace: backend
+data:
+  DOCKER_HOST_WORKSPACE: "$HOST_WORKSPACE"
+  MINIKUBE_WORKSPACE: "$MINIKUBE_WORKSPACE"
+EOF
+
 # Create PersistentVolumeClaim for logs
 echo ""
 echo "Creating PersistentVolumeClaim for logs..."
@@ -52,7 +79,7 @@ kubectl apply -f "$K8S_DIR/backend/logs-pvc.yaml"
 # Create workspace directory on Minikube node
 echo ""
 echo "Creating workspace directory on Minikube node..."
-minikube ssh "sudo mkdir -p /data/claude-workspace && sudo chmod 777 /data/claude-workspace"
+minikube ssh "sudo mkdir -p $MINIKUBE_WORKSPACE && sudo chmod 777 $MINIKUBE_WORKSPACE"
 
 # Deploy MCP server
 echo ""
@@ -83,6 +110,12 @@ echo "=========================================="
 echo "Deployment complete!"
 echo "=========================================="
 echo ""
+echo "IMPORTANT: Start the workspace mount in a separate terminal:"
+echo "  ./scripts/start-workspace-mount.sh"
+echo ""
+echo "This mount bridges the host and Minikube filesystems so that"
+echo "files created by MCP agents are visible in the pods."
+echo ""
 echo "To access the frontend, run:"
 echo "  minikube service frontend-service -n frontend"
 echo ""
@@ -93,14 +126,9 @@ echo "Check deployment status with:"
 echo "  kubectl get pods -n frontend"
 echo "  kubectl get pods -n backend"
 echo ""
+echo "View workspace files created by agents:"
+echo "  ls -la $HOST_WORKSPACE"
+echo "  kubectl exec -n backend deploy/orchestrator -- ls -la /workspace/"
+echo ""
 echo "View persistent logs with:"
 echo "  ./scripts/view-logs.sh"
-echo ""
-echo "Or manually access logs:"
-echo "  kubectl exec -n backend deploy/orchestrator -- ls -la /var/log/orchestrator/"
-echo "  kubectl exec -n backend deploy/orchestrator -- cat /var/log/orchestrator/orchestrator.log"
-echo "  kubectl exec -n backend deploy/orchestrator -- cat /var/log/orchestrator/orchestrator-errors.log"
-echo ""
-echo "View workspace files created by agents:"
-echo "  kubectl exec -n backend deploy/orchestrator -- ls -la /workspace/"
-echo "  # Or via API: curl http://<orchestrator-url>:8080/workspace"
