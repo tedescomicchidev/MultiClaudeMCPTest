@@ -1,0 +1,24 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-settings
+  namespace: backend
+  labels:
+    app.kubernetes.io/name: claude-multi-agent
+    app.kubernetes.io/component: orchestrator
+data:
+  mcp_settings.json: |
+    {
+      "mcpServers": {
+        "claude-code-docker": {
+          "command": "docker",
+          "args": [
+            "run", "-i", "--rm",
+            "-v", "/workspace:/workspace",
+            "claude-mcp:latest",
+            "claude", "mcp", "serve"
+          ]
+        }
+      }
+    }

@@ -1,0 +1,49 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-mcp-server
+  namespace: backend
+  labels:
+    app: claude-mcp-server
+    app.kubernetes.io/name: claude-multi-agent
+    app.kubernetes.io/component: mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: claude-mcp-server
+  template:
+    metadata:
+      labels:
+        app: claude-mcp-server
+    spec:
+      containers:
+        - name: claude-mcp-server
+          image: claude-mcp:latest
+          imagePullPolicy: IfNotPresent
+          # Start with a long-running process (interactive mode)
+          command: ["tail", "-f", "/dev/null"]
+          stdin: true
+          tty: true
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anthropic-api-key
+                  key: api-key
+            - name: IS_SANDBOX
+              value: "1"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "2000m"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      volumes:
+        - name: workspace
+          emptyDir: {}

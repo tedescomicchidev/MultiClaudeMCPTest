@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "claude-code-docker": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "/workspace:/workspace",
+        "claude-mcp:latest",
+        "claude", "mcp", "serve"
+      ]
+    }
+  }
+}

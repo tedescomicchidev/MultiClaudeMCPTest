@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Multi-Agent MCP System</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            color: #00d4ff;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 1.1rem;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 30px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #00d4ff;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 15px;
+            border: 2px solid rgba(0, 212, 255, 0.3);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            font-size: 1rem;
+            resize: vertical;
+            transition: border-color 0.3s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+
+        textarea::placeholder {
+            color: #666;
+        }
+
+        .agent-selector {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            height: 8px;
+            -webkit-appearance: none;
+            background: rgba(0, 212, 255, 0.3);
+            border-radius: 4px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 24px;
+            height: 24px;
+            background: #00d4ff;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .agent-count {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #00d4ff;
+            min-width: 50px;
+            text-align: center;
+        }
+
+        .go-button {
+            width: 100%;
+            padding: 18px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #fff;
+            background: linear-gradient(135deg, #00d4ff 0%, #0066ff 100%);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .go-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+        }
+
+        .go-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .go-button.loading {
+            position: relative;
+        }
+
+        .go-button.loading::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border: 3px solid transparent;
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .results {
+            margin-top: 20px;
+        }
+
+        .result-item {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #00d4ff;
+        }
+
+        .result-item.success {
+            border-left-color: #00ff88;
+        }
+
+        .result-item.error {
+            border-left-color: #ff4444;
+        }
+
+        .result-item h3 {
+            margin-bottom: 10px;
+            color: #00d4ff;
+        }
+
+        .result-item pre {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .status-message {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .status-message.info {
+            background: rgba(0, 212, 255, 0.2);
+            color: #00d4ff;
+        }
+
+        .status-message.error {
+            background: rgba(255, 68, 68, 0.2);
+            color: #ff4444;
+        }
+
+        .status-message.success {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Claude Multi-Agent MCP</h1>
+            <p class="subtitle">Orchestrate multiple Claude agents to work on your prompts</p>
+        </header>
+
+        <div class="card">
+            <form id="promptForm">
+                <div class="form-group">
+                    <label for="prompt">Enter your prompt</label>
+                    <textarea
+                        id="prompt"
+                        name="prompt"
+                        placeholder="Describe the task you want the agents to work on..."
+                        required
+                    ></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="agentCount">Number of Agents</label>
+                    <div class="agent-selector">
+                        <input
+                            type="range"
+                            id="agentCount"
+                            name="agentCount"
+                            min="1"
+                            max="10"
+                            value="1"
+                        >
+                        <span class="agent-count" id="agentCountDisplay">1</span>
+                    </div>
+                </div>
+
+                <button type="submit" class="go-button" id="goButton">
+                    GO - Launch Agents
+                </button>
+            </form>
+        </div>
+
+        <div class="results" id="results"></div>
+    </div>
+
+    <script>
+        const form = document.getElementById('promptForm');
+        const promptInput = document.getElementById('prompt');
+        const agentCountSlider = document.getElementById('agentCount');
+        const agentCountDisplay = document.getElementById('agentCountDisplay');
+        const goButton = document.getElementById('goButton');
+        const resultsContainer = document.getElementById('results');
+
+        // Update agent count display
+        agentCountSlider.addEventListener('input', function() {
+            agentCountDisplay.textContent = this.value;
+        });
+
+        // Handle form submission
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const prompt = promptInput.value.trim();
+            const agentCount = parseInt(agentCountSlider.value);
+
+            if (!prompt) {
+                showStatus('Please enter a prompt', 'error');
+                return;
+            }
+
+            // Disable button and show loading state
+            goButton.disabled = true;
+            goButton.classList.add('loading');
+            goButton.textContent = 'Processing...';
+
+            // Clear previous results
+            resultsContainer.innerHTML = '';
+            showStatus(`Launching ${agentCount} agent(s)... This may take a while.`, 'info');
+
+            try {
+                const response = await fetch('/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        agent_count: agentCount
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showStatus('Task completed successfully!', 'success');
+                    displayResults(data);
+                } else {
+                    showStatus(data.error || 'An error occurred', 'error');
+                }
+            } catch (error) {
+                showStatus(`Network error: ${error.message}`, 'error');
+            } finally {
+                // Reset button state
+                goButton.disabled = false;
+                goButton.classList.remove('loading');
+                goButton.textContent = 'GO - Launch Agents';
+            }
+        });
+
+        function showStatus(message, type) {
+            const existingStatus = resultsContainer.querySelector('.status-message');
+            if (existingStatus) {
+                existingStatus.remove();
+            }
+
+            const statusDiv = document.createElement('div');
+            statusDiv.className = `status-message ${type}`;
+            statusDiv.textContent = message;
+            resultsContainer.insertBefore(statusDiv, resultsContainer.firstChild);
+        }
+
+        function displayResults(data) {
+            if (data.results && Array.isArray(data.results)) {
+                data.results.forEach((result, index) => {
+                    const resultDiv = document.createElement('div');
+                    resultDiv.className = `result-item ${result.status || 'success'}`;
+                    resultDiv.innerHTML = `
+                        <h3>Agent ${index + 1} ${result.status === 'error' ? '(Error)' : '(Success)'}</h3>
+                        <pre>${escapeHtml(result.output || result.error || 'No output')}</pre>
+                    `;
+                    resultsContainer.appendChild(resultDiv);
+                });
+            } else if (data.message) {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'result-item success';
+                resultDiv.innerHTML = `
+                    <h3>Result</h3>
+                    <pre>${escapeHtml(data.message)}</pre>
+                `;
+                resultsContainer.appendChild(resultDiv);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
