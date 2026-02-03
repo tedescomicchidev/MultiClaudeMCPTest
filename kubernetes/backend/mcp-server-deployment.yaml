@@ -22,8 +22,32 @@ spec:
         - name: claude-mcp-server
           image: claude-mcp:latest
           imagePullPolicy: IfNotPresent
-          # Start with a long-running process (interactive mode)
-          command: ["tail", "-f", "/dev/null"]
+          # Start with a long-running process that also captures logs
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              # Create log directory
+              mkdir -p /var/log/mcp-server
+              LOG_FILE="/var/log/mcp-server/mcp-server.log"
+              ERROR_LOG="/var/log/mcp-server/mcp-server-errors.log"
+
+              # Log startup
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - MCP Server container started" | tee -a $LOG_FILE
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - Pod: $POD_NAME" | tee -a $LOG_FILE
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - Workspace: /workspace" | tee -a $LOG_FILE
+
+              # Trap signals for graceful shutdown logging
+              trap 'echo "$(date) - Received SIGTERM, shutting down..." | tee -a $LOG_FILE; exit 0' SIGTERM
+              trap 'echo "$(date) - Received SIGINT, shutting down..." | tee -a $LOG_FILE; exit 0' SIGINT
+
+              # Keep container running and log any activity
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - Container ready, waiting for MCP requests..." | tee -a $LOG_FILE
+
+              # Infinite loop with periodic health logging
+              while true; do
+                sleep 300
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - Heartbeat: MCP server container healthy" >> $LOG_FILE
+              done
           stdin: true
           tty: true
           env:
@@ -34,6 +58,10 @@ spec:
                   key: api-key
             - name: IS_SANDBOX
               value: "1"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           resources:
             requests:
               memory: "256Mi"
@@ -44,6 +72,12 @@ spec:
           volumeMounts:
             - name: workspace
               mountPath: /workspace
+            - name: logs
+              mountPath: /var/log/mcp-server
+              subPathExpr: mcp-server/$(POD_NAME)
       volumes:
         - name: workspace
           emptyDir: {}
+        - name: logs
+          persistentVolumeClaim:
+            claimName: backend-logs-pvc

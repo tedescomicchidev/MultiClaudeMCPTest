@@ -143,11 +143,13 @@ minikube service frontend-service -n frontend --url
 │       ├── orchestrator-service.yaml
 │       ├── mcp-server-deployment.yaml
 │       ├── configmap.yaml
-│       └── secret.yaml
+│       ├── secret.yaml
+│       └── logs-pvc.yaml      # Persistent volume for logs
 └── scripts/
     ├── build-images.sh
     ├── deploy.sh
-    └── cleanup.sh
+    ├── cleanup.sh
+    └── view-logs.sh           # Log viewer utility
 ```
 
 ## Usage
@@ -176,6 +178,65 @@ To scale the orchestrator:
 kubectl scale deployment orchestrator -n backend --replicas=4
 ```
 
+## Persistent Logging
+
+Errors and exceptions are persisted in a PersistentVolume so you can investigate issues even after pod restarts.
+
+### Log Locations
+
+| Component | Log Path | Description |
+|-----------|----------|-------------|
+| Orchestrator | `/var/log/orchestrator/orchestrator.log` | All logs (DEBUG level) |
+| Orchestrator | `/var/log/orchestrator/orchestrator-errors.log` | Errors only |
+| MCP Server | `/var/log/mcp-server/mcp-server.log` | Server activity logs |
+
+### View Logs with Helper Script
+
+```bash
+# View all logs
+./scripts/view-logs.sh
+
+# View orchestrator logs only
+./scripts/view-logs.sh --orchestrator
+
+# View only error logs
+./scripts/view-logs.sh --orchestrator-errors
+
+# View MCP server logs
+./scripts/view-logs.sh --mcp
+
+# Follow logs in real-time
+./scripts/view-logs.sh --tail --orchestrator
+
+# List all log files
+./scripts/view-logs.sh --list
+```
+
+### Manual Log Access
+
+```bash
+# List orchestrator log files
+kubectl exec -n backend deploy/orchestrator -- ls -la /var/log/orchestrator/
+
+# View orchestrator logs
+kubectl exec -n backend deploy/orchestrator -- cat /var/log/orchestrator/orchestrator.log
+
+# View orchestrator error logs
+kubectl exec -n backend deploy/orchestrator -- cat /var/log/orchestrator/orchestrator-errors.log
+
+# Follow orchestrator logs
+kubectl exec -n backend deploy/orchestrator -- tail -f /var/log/orchestrator/orchestrator.log
+
+# View MCP server logs
+kubectl exec -n backend deploy/claude-mcp-server -- cat /var/log/mcp-server/mcp-server.log
+```
+
+### Log Retention
+
+- Logs are stored in a 1GB PersistentVolumeClaim
+- Log files rotate at 10MB with 5 backups kept
+- Logs persist across pod restarts and redeployments
+
 ## Troubleshooting
 
 ### Check Pod Status
@@ -184,7 +245,7 @@ kubectl get pods -n frontend
 kubectl get pods -n backend
 ```
 
-### View Logs
+### View Container Logs (stdout/stderr)
 ```bash
 # Frontend logs
 kubectl logs -n frontend -l app=frontend
@@ -194,6 +255,12 @@ kubectl logs -n backend -l app=orchestrator
 
 # MCP server logs
 kubectl logs -n backend -l app=claude-mcp-server
+```
+
+### View Persistent Error Logs
+```bash
+# Quick error investigation
+./scripts/view-logs.sh --orchestrator-errors
 ```
 
 ### Restart Deployments

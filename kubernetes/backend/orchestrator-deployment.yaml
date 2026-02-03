@@ -37,6 +37,14 @@ spec:
               value: "claude-mcp:latest"
             - name: PORT
               value: "8080"
+            - name: LOG_DIR
+              value: "/var/log/orchestrator"
+            - name: LOG_LEVEL
+              value: "DEBUG"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           resources:
             requests:
               memory: "256Mi"
@@ -52,6 +60,9 @@ spec:
             - name: mcp-settings
               mountPath: /app/mcp_settings.json
               subPath: mcp_settings.json
+            - name: logs
+              mountPath: /var/log/orchestrator
+              subPathExpr: orchestrator/$(POD_NAME)
           livenessProbe:
             httpGet:
               path: /health
@@ -78,3 +89,6 @@ spec:
         - name: mcp-settings
           configMap:
             name: mcp-settings
+        - name: logs
+          persistentVolumeClaim:
+            claimName: backend-logs-pvc

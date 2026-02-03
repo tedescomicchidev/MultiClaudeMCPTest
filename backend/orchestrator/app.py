@@ -7,16 +7,59 @@ import asyncio
 import os
 import json
 import logging
+import traceback
+import sys
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from typing import List, Dict, Any
 from flask import Flask, request, jsonify
 from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Configuration
+LOG_DIR = os.getenv("LOG_DIR", "/var/log/orchestrator")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# Ensure log directory exists
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Configure logging with both console and file handlers
+def setup_logging():
+    """Setup logging with file persistence and rotation."""
+    log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+    # Root logger configuration
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter(log_format))
+    root_logger.addHandler(console_handler)
+
+    # File handler with rotation (10MB max, keep 5 backups)
+    file_handler = RotatingFileHandler(
+        os.path.join(LOG_DIR, 'orchestrator.log'),
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(log_format))
+    root_logger.addHandler(file_handler)
+
+    # Error-specific file handler for easy error investigation
+    error_handler = RotatingFileHandler(
+        os.path.join(LOG_DIR, 'orchestrator-errors.log'),
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
+    )
+    error_handler.setLevel(logging.ERROR)
+    error_handler.setFormatter(logging.Formatter(log_format))
+    root_logger.addHandler(error_handler)
+
+    return logging.getLogger(__name__)
+
+logger = setup_logging()
 
 app = Flask(__name__)
 
@@ -94,7 +137,9 @@ async def run_agent(agent_id: int, prompt: str) -> Dict[str, Any]:
     except Exception as e:
         result["status"] = "error"
         result["error"] = str(e)
+        result["traceback"] = traceback.format_exc()
         logger.error(f"Agent {agent_id}: Exception - {e}")
+        logger.error(f"Agent {agent_id}: Traceback:\n{traceback.format_exc()}")
 
     return result
 
@@ -184,7 +229,8 @@ def orchestrate():
 
     except Exception as e:
         logger.error(f"Orchestration error: {e}")
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Orchestration traceback:\n{traceback.format_exc()}")
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
 
 @app.route("/health")

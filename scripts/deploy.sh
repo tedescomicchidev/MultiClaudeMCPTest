@@ -44,6 +44,11 @@ echo ""
 echo "Creating MCP settings ConfigMap..."
 kubectl apply -f "$K8S_DIR/backend/configmap.yaml"
 
+# Create PersistentVolumeClaim for logs
+echo ""
+echo "Creating PersistentVolumeClaim for logs..."
+kubectl apply -f "$K8S_DIR/backend/logs-pvc.yaml"
+
 # Deploy MCP server
 echo ""
 echo "Deploying MCP server..."
@@ -82,3 +87,11 @@ echo ""
 echo "Check deployment status with:"
 echo "  kubectl get pods -n frontend"
 echo "  kubectl get pods -n backend"
+echo ""
+echo "View persistent logs with:"
+echo "  ./scripts/view-logs.sh"
+echo ""
+echo "Or manually access logs:"
+echo "  kubectl exec -n backend deploy/orchestrator -- ls -la /var/log/orchestrator/"
+echo "  kubectl exec -n backend deploy/orchestrator -- cat /var/log/orchestrator/orchestrator.log"
+echo "  kubectl exec -n backend deploy/orchestrator -- cat /var/log/orchestrator/orchestrator-errors.log"
