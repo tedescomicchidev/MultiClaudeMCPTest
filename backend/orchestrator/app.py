@@ -67,7 +67,10 @@ app = Flask(__name__)
 
 # Configuration from environment
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-WORKSPACE_PATH = os.getenv("WORKSPACE_PATH", "/workspace")
+# WORKSPACE_PATH is the path on the Docker host (Minikube node) used for docker run -v
+WORKSPACE_PATH = os.getenv("WORKSPACE_PATH", "/data/claude-workspace")
+# WORKSPACE_LOCAL is where the workspace is mounted inside this container
+WORKSPACE_LOCAL = os.getenv("WORKSPACE_LOCAL", "/workspace")
 DOCKER_MCP_IMAGE = os.getenv("DOCKER_MCP_IMAGE", "claude-mcp:latest")
 
 
@@ -330,11 +333,20 @@ def diagnostics():
     Diagnostic endpoint to check Docker and system status.
     Use this to troubleshoot issues with agent execution.
     """
+    # List workspace files for debugging
+    workspace_files = []
+    try:
+        if os.path.exists(WORKSPACE_LOCAL):
+            workspace_files = os.listdir(WORKSPACE_LOCAL)[:20]  # Limit to 20 files
+    except Exception as e:
+        workspace_files = [f"Error listing: {e}"]
+
     diag = {
         "timestamp": datetime.now().isoformat(),
         "environment": {
             "ANTHROPIC_API_KEY": "***SET***" if ANTHROPIC_API_KEY else "NOT SET",
-            "WORKSPACE_PATH": WORKSPACE_PATH,
+            "WORKSPACE_PATH": WORKSPACE_PATH,  # Path used for docker run -v (on Docker host)
+            "WORKSPACE_LOCAL": WORKSPACE_LOCAL,  # Path inside this container
             "DOCKER_MCP_IMAGE": DOCKER_MCP_IMAGE,
             "LOG_DIR": LOG_DIR,
             "LOG_LEVEL": LOG_LEVEL,
@@ -342,8 +354,9 @@ def diagnostics():
         },
         "docker": check_docker_available(),
         "filesystem": {
-            "workspace_exists": os.path.exists(WORKSPACE_PATH),
-            "workspace_writable": os.access(WORKSPACE_PATH, os.W_OK) if os.path.exists(WORKSPACE_PATH) else False,
+            "workspace_local_exists": os.path.exists(WORKSPACE_LOCAL),
+            "workspace_local_writable": os.access(WORKSPACE_LOCAL, os.W_OK) if os.path.exists(WORKSPACE_LOCAL) else False,
+            "workspace_files": workspace_files,
             "log_dir_exists": os.path.exists(LOG_DIR),
             "log_dir_writable": os.access(LOG_DIR, os.W_OK) if os.path.exists(LOG_DIR) else False,
         }
@@ -396,6 +409,95 @@ def test_docker():
     logger.info(f"Docker test result: {json.dumps(result, indent=2)}")
 
     return jsonify(result)
+
+
+@app.route("/workspace")
+def list_workspace():
+    """
+    List files in the workspace directory.
+    Use this to see files created by MCP agents.
+    """
+    result = {
+        "workspace_path": WORKSPACE_LOCAL,
+        "docker_workspace_path": WORKSPACE_PATH,
+        "files": [],
+        "error": None
+    }
+
+    try:
+        if not os.path.exists(WORKSPACE_LOCAL):
+            result["error"] = f"Workspace directory does not exist: {WORKSPACE_LOCAL}"
+            return jsonify(result), 404
+
+        # Walk through workspace and list files
+        for root, dirs, files in os.walk(WORKSPACE_LOCAL):
+            rel_root = os.path.relpath(root, WORKSPACE_LOCAL)
+            if rel_root == ".":
+                rel_root = ""
+
+            for f in files:
+                file_path = os.path.join(rel_root, f) if rel_root else f
+                full_path = os.path.join(root, f)
+                try:
+                    stat = os.stat(full_path)
+                    result["files"].append({
+                        "path": file_path,
+                        "size": stat.st_size,
+                        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                    })
+                except Exception as e:
+                    result["files"].append({
+                        "path": file_path,
+                        "error": str(e)
+                    })
+
+            # Limit depth and total files
+            if len(result["files"]) > 100:
+                result["truncated"] = True
+                break
+
+    except Exception as e:
+        result["error"] = str(e)
+        logger.error(f"Error listing workspace: {e}")
+        return jsonify(result), 500
+
+    return jsonify(result)
+
+
+@app.route("/workspace/<path:filepath>")
+def get_workspace_file(filepath):
+    """
+    Get contents of a specific file from the workspace.
+    """
+    full_path = os.path.join(WORKSPACE_LOCAL, filepath)
+
+    # Security: ensure path is within workspace
+    if not os.path.abspath(full_path).startswith(os.path.abspath(WORKSPACE_LOCAL)):
+        return jsonify({"error": "Access denied: path traversal detected"}), 403
+
+    if not os.path.exists(full_path):
+        return jsonify({"error": f"File not found: {filepath}"}), 404
+
+    if os.path.isdir(full_path):
+        return jsonify({"error": f"Path is a directory: {filepath}"}), 400
+
+    try:
+        # Limit file size to 1MB for safety
+        if os.path.getsize(full_path) > 1024 * 1024:
+            return jsonify({"error": "File too large (>1MB)"}), 413
+
+        with open(full_path, 'r') as f:
+            content = f.read()
+
+        return jsonify({
+            "path": filepath,
+            "content": content,
+            "size": len(content)
+        })
+    except UnicodeDecodeError:
+        return jsonify({"error": "Binary file, cannot display as text"}), 415
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

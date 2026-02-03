@@ -1,0 +1,38 @@
+---
+# PersistentVolumeClaim for agent workspace
+# Files created by MCP agents will be stored here
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agent-workspace-pvc
+  namespace: backend
+  labels:
+    app.kubernetes.io/name: claude-multi-agent
+    app.kubernetes.io/component: workspace
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+---
+# HostPath PersistentVolume for Minikube
+# This ensures the workspace is accessible from both pods and docker run commands
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: agent-workspace-pv
+  labels:
+    app.kubernetes.io/name: claude-multi-agent
+    app.kubernetes.io/component: workspace
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: standard
+  hostPath:
+    path: /data/claude-workspace
+    type: DirectoryOrCreate

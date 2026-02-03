@@ -49,6 +49,11 @@ echo ""
 echo "Creating PersistentVolumeClaim for logs..."
 kubectl apply -f "$K8S_DIR/backend/logs-pvc.yaml"
 
+# Create workspace directory on Minikube node
+echo ""
+echo "Creating workspace directory on Minikube node..."
+minikube ssh "sudo mkdir -p /data/claude-workspace && sudo chmod 777 /data/claude-workspace"
+
 # Deploy MCP server
 echo ""
 echo "Deploying MCP server..."
@@ -95,3 +100,7 @@ echo "Or manually access logs:"
 echo "  kubectl exec -n backend deploy/orchestrator -- ls -la /var/log/orchestrator/"
 echo "  kubectl exec -n backend deploy/orchestrator -- cat /var/log/orchestrator/orchestrator.log"
 echo "  kubectl exec -n backend deploy/orchestrator -- cat /var/log/orchestrator/orchestrator-errors.log"
+echo ""
+echo "View workspace files created by agents:"
+echo "  kubectl exec -n backend deploy/orchestrator -- ls -la /workspace/"
+echo "  # Or via API: curl http://<orchestrator-url>:8080/workspace"

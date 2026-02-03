@@ -76,8 +76,11 @@ spec:
               mountPath: /var/log/mcp-server
               subPathExpr: mcp-server/$(POD_NAME)
       volumes:
+        # Shared workspace with orchestrator and docker-spawned MCP containers
         - name: workspace
-          emptyDir: {}
+          hostPath:
+            path: /data/claude-workspace
+            type: DirectoryOrCreate
         - name: logs
           persistentVolumeClaim:
             claimName: backend-logs-pvc
