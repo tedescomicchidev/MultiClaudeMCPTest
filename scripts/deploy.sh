@@ -19,6 +19,15 @@ K8S_DIR="$PROJECT_ROOT/kubernetes"
 HOST_WORKSPACE="${HOST_WORKSPACE:-$HOME/claude-workspace}"
 MINIKUBE_WORKSPACE="/data/claude-workspace"
 
+echo ""
+echo "Configuration:"
+echo "  HOST_WORKSPACE: $HOST_WORKSPACE"
+echo "  MINIKUBE_WORKSPACE: $MINIKUBE_WORKSPACE"
+echo ""
+echo "To use a different host workspace, set HOST_WORKSPACE before running:"
+echo "  HOST_WORKSPACE=/path/to/workspace ./scripts/deploy.sh"
+echo ""
+
 # Check if minikube is running
 if ! minikube status | grep -q "Running"; then
     echo "Error: Minikube is not running. Please start it with 'minikube start'"
@@ -57,19 +66,14 @@ kubectl apply -f "$K8S_DIR/backend/configmap.yaml"
 
 # Create workspace config with the correct host path
 echo ""
-echo "Creating workspace configuration..."
-echo "  Host workspace: $HOST_WORKSPACE"
-echo "  Minikube workspace: $MINIKUBE_WORKSPACE"
-cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: workspace-config
-  namespace: backend
-data:
-  DOCKER_HOST_WORKSPACE: "$HOST_WORKSPACE"
-  MINIKUBE_WORKSPACE: "$MINIKUBE_WORKSPACE"
-EOF
+echo "Creating workspace configuration ConfigMap..."
+echo "  DOCKER_HOST_WORKSPACE: $HOST_WORKSPACE"
+echo "  MINIKUBE_WORKSPACE: $MINIKUBE_WORKSPACE"
+kubectl create configmap workspace-config \
+    --namespace=backend \
+    --from-literal=DOCKER_HOST_WORKSPACE="$HOST_WORKSPACE" \
+    --from-literal=MINIKUBE_WORKSPACE="$MINIKUBE_WORKSPACE" \
+    --dry-run=client -o yaml | kubectl apply -f -
 
 # Create PersistentVolumeClaim for logs
 echo ""
@@ -110,25 +114,36 @@ echo "=========================================="
 echo "Deployment complete!"
 echo "=========================================="
 echo ""
-echo "IMPORTANT: Start the workspace mount in a separate terminal:"
-echo "  ./scripts/start-workspace-mount.sh"
+echo "╔══════════════════════════════════════════════════════════════════╗"
+echo "║  IMPORTANT: Start the workspace mount in a SEPARATE terminal!   ║"
+echo "╚══════════════════════════════════════════════════════════════════╝"
+echo ""
+echo "Run this command and KEEP IT RUNNING:"
+echo ""
+echo "  minikube mount $HOST_WORKSPACE:$MINIKUBE_WORKSPACE"
+echo ""
+echo "Or use the helper script:"
+echo "  HOST_WORKSPACE=$HOST_WORKSPACE ./scripts/start-workspace-mount.sh"
 echo ""
 echo "This mount bridges the host and Minikube filesystems so that"
 echo "files created by MCP agents are visible in the pods."
 echo ""
-echo "To access the frontend, run:"
+echo "=========================================="
+echo ""
+echo "To access the frontend:"
 echo "  minikube service frontend-service -n frontend"
 echo ""
-echo "Or get the URL with:"
-echo "  minikube service frontend-service -n frontend --url"
-echo ""
-echo "Check deployment status with:"
+echo "Check deployment status:"
 echo "  kubectl get pods -n frontend"
 echo "  kubectl get pods -n backend"
+echo ""
+echo "Verify workspace config:"
+echo "  kubectl get configmap workspace-config -n backend -o yaml"
+echo "  kubectl exec -n backend deploy/orchestrator -- env | grep WORKSPACE"
 echo ""
 echo "View workspace files created by agents:"
 echo "  ls -la $HOST_WORKSPACE"
 echo "  kubectl exec -n backend deploy/orchestrator -- ls -la /workspace/"
 echo ""
-echo "View persistent logs with:"
+echo "View logs:"
 echo "  ./scripts/view-logs.sh"
