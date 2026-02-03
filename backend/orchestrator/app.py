@@ -9,6 +9,8 @@ import json
 import logging
 import traceback
 import sys
+import subprocess
+import shutil
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from typing import List, Dict, Any
@@ -69,6 +71,62 @@ WORKSPACE_PATH = os.getenv("WORKSPACE_PATH", "/workspace")
 DOCKER_MCP_IMAGE = os.getenv("DOCKER_MCP_IMAGE", "claude-mcp:latest")
 
 
+def check_docker_available() -> Dict[str, Any]:
+    """Check if Docker is available and accessible."""
+    result = {
+        "docker_cli": False,
+        "docker_socket": False,
+        "docker_running": False,
+        "mcp_image_exists": False,
+        "errors": []
+    }
+
+    # Check if docker CLI exists
+    docker_path = shutil.which("docker")
+    result["docker_cli"] = docker_path is not None
+    result["docker_cli_path"] = docker_path
+
+    # Check if Docker socket exists
+    socket_path = "/var/run/docker.sock"
+    result["docker_socket"] = os.path.exists(socket_path)
+    result["docker_socket_path"] = socket_path
+
+    # Try to run docker info
+    if result["docker_cli"]:
+        try:
+            proc = subprocess.run(
+                ["docker", "info"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            result["docker_running"] = proc.returncode == 0
+            if proc.returncode != 0:
+                result["errors"].append(f"docker info failed: {proc.stderr}")
+        except subprocess.TimeoutExpired:
+            result["errors"].append("docker info timed out")
+        except Exception as e:
+            result["errors"].append(f"docker info error: {str(e)}")
+
+    # Check if MCP image exists
+    if result["docker_running"]:
+        try:
+            proc = subprocess.run(
+                ["docker", "images", "-q", DOCKER_MCP_IMAGE],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            result["mcp_image_exists"] = bool(proc.stdout.strip())
+            result["mcp_image_name"] = DOCKER_MCP_IMAGE
+            if not result["mcp_image_exists"]:
+                result["errors"].append(f"MCP image '{DOCKER_MCP_IMAGE}' not found")
+        except Exception as e:
+            result["errors"].append(f"docker images error: {str(e)}")
+
+    return result
+
+
 def get_mcp_options() -> ClaudeAgentOptions:
     """
     Create ClaudeAgentOptions with MCP server configuration.
@@ -113,13 +171,31 @@ async def run_agent(agent_id: int, prompt: str) -> Dict[str, Any]:
         "messages": []
     }
 
+    # Pre-flight check: verify Docker is available
+    docker_check = check_docker_available()
+    if not docker_check["docker_running"]:
+        result["status"] = "error"
+        result["error"] = "Docker is not available or not running"
+        result["docker_diagnostics"] = docker_check
+        logger.error(f"Agent {agent_id}: Docker not available - {docker_check['errors']}")
+        return result
+
+    if not docker_check["mcp_image_exists"]:
+        result["status"] = "error"
+        result["error"] = f"MCP image '{DOCKER_MCP_IMAGE}' not found. Please build it first."
+        result["docker_diagnostics"] = docker_check
+        logger.error(f"Agent {agent_id}: MCP image not found")
+        return result
+
     try:
         options = get_mcp_options()
+        logger.info(f"Agent {agent_id}: MCP options configured - image: {DOCKER_MCP_IMAGE}, workspace: {WORKSPACE_PATH}")
 
         async for message in query(prompt=prompt, options=options):
             # Log message type for debugging
             message_type = type(message).__name__
             logger.debug(f"Agent {agent_id}: Received message type: {message_type}")
+            logger.debug(f"Agent {agent_id}: Message content: {str(message)[:200]}")
 
             if isinstance(message, ResultMessage):
                 if message.subtype == "success":
@@ -246,6 +322,80 @@ def ready():
     if not ANTHROPIC_API_KEY:
         return jsonify({"status": "not_ready", "reason": "ANTHROPIC_API_KEY not set"}), 503
     return jsonify({"status": "ready"})
+
+
+@app.route("/diagnostics")
+def diagnostics():
+    """
+    Diagnostic endpoint to check Docker and system status.
+    Use this to troubleshoot issues with agent execution.
+    """
+    diag = {
+        "timestamp": datetime.now().isoformat(),
+        "environment": {
+            "ANTHROPIC_API_KEY": "***SET***" if ANTHROPIC_API_KEY else "NOT SET",
+            "WORKSPACE_PATH": WORKSPACE_PATH,
+            "DOCKER_MCP_IMAGE": DOCKER_MCP_IMAGE,
+            "LOG_DIR": LOG_DIR,
+            "LOG_LEVEL": LOG_LEVEL,
+            "POD_NAME": os.getenv("POD_NAME", "unknown"),
+        },
+        "docker": check_docker_available(),
+        "filesystem": {
+            "workspace_exists": os.path.exists(WORKSPACE_PATH),
+            "workspace_writable": os.access(WORKSPACE_PATH, os.W_OK) if os.path.exists(WORKSPACE_PATH) else False,
+            "log_dir_exists": os.path.exists(LOG_DIR),
+            "log_dir_writable": os.access(LOG_DIR, os.W_OK) if os.path.exists(LOG_DIR) else False,
+        }
+    }
+
+    logger.info(f"Diagnostics requested: {json.dumps(diag, indent=2)}")
+
+    # Determine overall status
+    docker_ok = (
+        diag["docker"]["docker_cli"] and
+        diag["docker"]["docker_socket"] and
+        diag["docker"]["docker_running"] and
+        diag["docker"]["mcp_image_exists"]
+    )
+
+    diag["status"] = "ok" if docker_ok else "issues_detected"
+
+    return jsonify(diag)
+
+
+@app.route("/test-docker")
+def test_docker():
+    """
+    Test Docker by running a simple command.
+    """
+    result = {
+        "test": "docker_hello_world",
+        "success": False,
+        "output": "",
+        "error": ""
+    }
+
+    try:
+        proc = subprocess.run(
+            ["docker", "run", "--rm", "alpine:latest", "echo", "Hello from Docker!"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        result["success"] = proc.returncode == 0
+        result["output"] = proc.stdout.strip()
+        result["error"] = proc.stderr.strip() if proc.returncode != 0 else ""
+        result["exit_code"] = proc.returncode
+    except subprocess.TimeoutExpired:
+        result["error"] = "Command timed out after 60 seconds"
+    except Exception as e:
+        result["error"] = str(e)
+        result["traceback"] = traceback.format_exc()
+
+    logger.info(f"Docker test result: {json.dumps(result, indent=2)}")
+
+    return jsonify(result)
 
 
 if __name__ == "__main__":
