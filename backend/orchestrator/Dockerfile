@@ -34,4 +34,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # Run with gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--threads", "4", "--timeout", "300", "app:app"]
+# --capture-output: Capture stdout/stderr from workers (required for Python logging)
+# --access-logfile -: Log HTTP requests to stdout
+# --log-level info: Set gunicorn log level
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--threads", "4", "--timeout", "300", "--capture-output", "--access-logfile", "-", "--log-level", "info", "app:app"]

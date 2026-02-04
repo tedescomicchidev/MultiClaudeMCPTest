@@ -34,11 +34,17 @@ def setup_logging():
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
 
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Console handler - use stderr for gunicorn compatibility
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(logging.Formatter(log_format))
     root_logger.addHandler(console_handler)
+
+    # Also hook into gunicorn's logger if available
+    gunicorn_logger = logging.getLogger('gunicorn.error')
+    if gunicorn_logger.handlers:
+        root_logger.handlers = gunicorn_logger.handlers
+        root_logger.setLevel(gunicorn_logger.level)
 
     # File handler with rotation (10MB max, keep 5 backups)
     file_handler = RotatingFileHandler(
