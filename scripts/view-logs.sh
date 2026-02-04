@@ -19,15 +19,19 @@ show_help() {
     echo "  --orchestrator, -o     Show orchestrator logs"
     echo "  --orchestrator-errors  Show orchestrator error logs only"
     echo "  --mcp, -m              Show MCP server logs"
+    echo "  --container, -c        Show container stdout/stderr logs (kubectl logs)"
     echo "  --all, -a              Show all logs (default)"
     echo "  --tail, -t             Follow logs (like tail -f)"
+    echo "  --last N               Show last N lines (default: 100)"
     echo "  --list, -l             List all log files"
     echo "  --help, -h             Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0 --orchestrator        # View orchestrator logs"
     echo "  $0 --orchestrator-errors # View only error logs"
+    echo "  $0 --container           # View container stdout/stderr"
     echo "  $0 --tail -o             # Follow orchestrator logs"
+    echo "  $0 --last 50 -o          # Show last 50 lines of orchestrator logs"
     echo "  $0 --list                # List all log files"
     echo ""
 }
@@ -59,11 +63,33 @@ view_orchestrator_logs() {
 }
 
 view_orchestrator_errors() {
+    local last_n=$1
     echo ""
     echo "=== Orchestrator Error Logs ==="
     echo ""
-    kubectl exec -n $NAMESPACE deploy/orchestrator -- cat /var/log/orchestrator/orchestrator-errors.log 2>/dev/null || \
-    echo "No error logs found"
+    if [ -n "$last_n" ] && [ "$last_n" -gt 0 ] 2>/dev/null; then
+        kubectl exec -n $NAMESPACE deploy/orchestrator -- tail -n $last_n /var/log/orchestrator/orchestrator-errors.log 2>/dev/null || \
+        echo "No error logs found"
+    else
+        kubectl exec -n $NAMESPACE deploy/orchestrator -- cat /var/log/orchestrator/orchestrator-errors.log 2>/dev/null || \
+        echo "No error logs found"
+    fi
+}
+
+view_container_logs() {
+    local follow=$1
+    local last_n=$2
+    echo ""
+    echo "=== Container Logs (stdout/stderr) ==="
+    echo ""
+
+    if [ "$follow" = "true" ]; then
+        echo "--- Orchestrator Container ---"
+        kubectl logs -n $NAMESPACE deploy/orchestrator -f
+    else
+        echo "--- Orchestrator Container (last ${last_n:-100} lines) ---"
+        kubectl logs -n $NAMESPACE deploy/orchestrator --tail=${last_n:-100}
+    fi
 }
 
 view_mcp_logs() {
@@ -87,8 +113,10 @@ FOLLOW="false"
 VIEW_ORCH="false"
 VIEW_ORCH_ERRORS="false"
 VIEW_MCP="false"
+VIEW_CONTAINER="false"
 VIEW_ALL="true"
 LIST_ONLY="false"
+LAST_N=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -107,6 +135,11 @@ while [[ $# -gt 0 ]]; do
             VIEW_ALL="false"
             shift
             ;;
+        --container|-c)
+            VIEW_CONTAINER="true"
+            VIEW_ALL="false"
+            shift
+            ;;
         --all|-a)
             VIEW_ALL="true"
             shift
@@ -114,6 +147,10 @@ while [[ $# -gt 0 ]]; do
         --tail|-t)
             FOLLOW="true"
             shift
+            ;;
+        --last)
+            LAST_N="$2"
+            shift 2
             ;;
         --list|-l)
             LIST_ONLY="true"
@@ -142,18 +179,22 @@ if [ "$VIEW_ORCH" = "true" ]; then
 fi
 
 if [ "$VIEW_ORCH_ERRORS" = "true" ]; then
-    view_orchestrator_errors
+    view_orchestrator_errors $LAST_N
 fi
 
 if [ "$VIEW_MCP" = "true" ]; then
     view_mcp_logs $FOLLOW
 fi
 
+if [ "$VIEW_CONTAINER" = "true" ]; then
+    view_container_logs $FOLLOW $LAST_N
+fi
+
 if [ "$VIEW_ALL" = "true" ]; then
     view_orchestrator_logs $FOLLOW
     echo ""
     echo "----------------------------------------"
-    view_orchestrator_errors
+    view_orchestrator_errors $LAST_N
     echo ""
     echo "----------------------------------------"
     view_mcp_logs $FOLLOW
