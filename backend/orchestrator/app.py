@@ -489,10 +489,19 @@ async def run_agent(agent_id: int, prompt: str, agent_workspace: Dict[str, Any] 
                 elif message.subtype == "error":
                     result["status"] = "error"
                     result["error"] = message.result
-                    logger.error(f"Agent {agent_id}: Error - {message.result}")
+                    # Log API errors with full details for investigation
+                    error_details = {
+                        "agent_id": agent_id,
+                        "error_message": message.result,
+                        "timestamp": datetime.now().isoformat(),
+                        "workspace": workspace_path
+                    }
+                    logger.error(f"Agent {agent_id}: API/SDK Error - {message.result}")
+                    logger.error(f"Agent {agent_id}: Error details: {json.dumps(error_details)}")
             else:
                 # Capture other message types
                 result["messages"].append(str(message))
+                logger.debug(f"Agent {agent_id}: Other message - {str(message)[:100]}")
 
     except Exception as e:
         result["status"] = "error"
