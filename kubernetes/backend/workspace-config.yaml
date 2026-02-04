@@ -13,7 +13,7 @@ data:
   # Path on the Docker HOST (your Mac/Linux machine) - used for docker run -v
   # This MUST match the HOST_WORKSPACE in start-workspace-mount.sh
   # Default: $HOME/claude-workspace (will be substituted during deploy)
-  DOCKER_HOST_WORKSPACE: "$HOME/code/minikube-storage"
+  DOCKER_HOST_WORKSPACE: "/tmp/claude-workspace"
 
   # Path inside Minikube node - mapped via minikube mount
-  MINIKUBE_WORKSPACE: "/mnt/claude-workspace"
+  MINIKUBE_WORKSPACE: "/data/claude-workspace"

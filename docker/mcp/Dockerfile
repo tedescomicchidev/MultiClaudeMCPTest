@@ -11,7 +11,7 @@ RUN apk update && apk add --no-cache \
     nodejs \
     npm \
     vim \
-    coreutils
+    tee
 
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code

@@ -79,7 +79,7 @@ spec:
         # Shared workspace with orchestrator and docker-spawned MCP containers
         - name: workspace
           hostPath:
-            path: $HOME/code/minikube-storage
+            path: /data/claude-workspace
             type: DirectoryOrCreate
         - name: logs
           persistentVolumeClaim:

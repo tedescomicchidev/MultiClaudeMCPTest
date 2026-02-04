@@ -16,8 +16,8 @@ K8S_DIR="$PROJECT_ROOT/kubernetes"
 # Workspace configuration
 # HOST_WORKSPACE: Path on your actual machine (Mac/Linux) - used by docker run -v
 # MINIKUBE_WORKSPACE: Path inside Minikube VM - used by pod hostPath
-HOST_WORKSPACE="${HOST_WORKSPACE:-$HOME/code/minikube-storage}"
-MINIKUBE_WORKSPACE="/mnt/claude-workspace"
+HOST_WORKSPACE="${HOST_WORKSPACE:-$HOME/claude-workspace}"
+MINIKUBE_WORKSPACE="/data/claude-workspace"
 
 echo ""
 echo "Configuration:"
