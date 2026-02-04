@@ -11,9 +11,10 @@ import traceback
 import sys
 import subprocess
 import shutil
+import uuid
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from flask import Flask, request, jsonify
 from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
 
@@ -130,9 +131,275 @@ def check_docker_available() -> Dict[str, Any]:
     return result
 
 
+def create_run_directory(run_id: str) -> str:
+    """
+    Create a directory for the current run.
+
+    Args:
+        run_id: Unique identifier for this run
+
+    Returns:
+        Path to the run directory (relative to workspace)
+    """
+    run_dir_name = f"run_{run_id}"
+    run_dir_local = os.path.join(WORKSPACE_LOCAL, "runs", run_dir_name)
+
+    # Create the directory
+    os.makedirs(run_dir_local, exist_ok=True)
+    logger.info(f"Created run directory: {run_dir_local}")
+
+    return os.path.join("runs", run_dir_name)
+
+
+def init_git_repo(run_dir_rel: str) -> bool:
+    """
+    Initialize a git repository for the run.
+
+    Args:
+        run_dir_rel: Relative path to run directory from workspace
+
+    Returns:
+        True if successful, False otherwise
+    """
+    run_dir_local = os.path.join(WORKSPACE_LOCAL, run_dir_rel)
+
+    try:
+        # Initialize git repo
+        result = subprocess.run(
+            ["git", "init"],
+            cwd=run_dir_local,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode != 0:
+            logger.error(f"Git init failed: {result.stderr}")
+            return False
+
+        # Configure git user for commits
+        subprocess.run(
+            ["git", "config", "user.email", "agent@claude-mcp.local"],
+            cwd=run_dir_local,
+            capture_output=True,
+            timeout=10
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Claude Agent"],
+            cwd=run_dir_local,
+            capture_output=True,
+            timeout=10
+        )
+
+        # Create initial commit
+        readme_path = os.path.join(run_dir_local, "README.md")
+        with open(readme_path, "w") as f:
+            f.write(f"# Run {run_dir_rel}\n\nCreated at: {datetime.now().isoformat()}\n")
+
+        subprocess.run(
+            ["git", "add", "README.md"],
+            cwd=run_dir_local,
+            capture_output=True,
+            timeout=10
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "Initial commit"],
+            cwd=run_dir_local,
+            capture_output=True,
+            timeout=10
+        )
+
+        logger.info(f"Initialized git repo in {run_dir_local}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error initializing git repo: {e}")
+        return False
+
+
+def create_agent_worktree(run_dir_rel: str, agent_id: int) -> Tuple[str, str]:
+    """
+    Create a git worktree and branch for an agent.
+
+    Args:
+        run_dir_rel: Relative path to run directory from workspace
+        agent_id: Agent identifier
+
+    Returns:
+        Tuple of (worktree_path_rel, branch_name) relative to workspace
+    """
+    run_dir_local = os.path.join(WORKSPACE_LOCAL, run_dir_rel)
+    branch_name = f"agent-{agent_id}"
+    worktree_name = f"agent-{agent_id}"
+    worktree_path_rel = os.path.join(run_dir_rel, "worktrees", worktree_name)
+    worktree_path_local = os.path.join(WORKSPACE_LOCAL, worktree_path_rel)
+
+    try:
+        # Create worktrees directory
+        worktrees_dir = os.path.join(run_dir_local, "worktrees")
+        os.makedirs(worktrees_dir, exist_ok=True)
+
+        # Create branch
+        subprocess.run(
+            ["git", "branch", branch_name],
+            cwd=run_dir_local,
+            capture_output=True,
+            timeout=10
+        )
+
+        # Create worktree
+        result = subprocess.run(
+            ["git", "worktree", "add", worktree_path_local, branch_name],
+            cwd=run_dir_local,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0:
+            logger.error(f"Failed to create worktree: {result.stderr}")
+            # Fallback: just use a subdirectory
+            os.makedirs(worktree_path_local, exist_ok=True)
+
+        logger.info(f"Created worktree for agent {agent_id}: {worktree_path_rel} on branch {branch_name}")
+        return worktree_path_rel, branch_name
+
+    except Exception as e:
+        logger.error(f"Error creating worktree for agent {agent_id}: {e}")
+        # Fallback: create simple directory
+        os.makedirs(worktree_path_local, exist_ok=True)
+        return worktree_path_rel, branch_name
+
+
+def setup_run_environment(agent_count: int) -> Dict[str, Any]:
+    """
+    Set up the complete run environment with git repo and worktrees.
+
+    Args:
+        agent_count: Number of agents to create worktrees for
+
+    Returns:
+        Dictionary with run information including paths and branches
+    """
+    # Generate unique run ID
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_id = f"{timestamp}_{uuid.uuid4().hex[:8]}"
+
+    # Create run directory
+    run_dir_rel = create_run_directory(run_id)
+
+    # Initialize git repo
+    git_initialized = init_git_repo(run_dir_rel)
+
+    # Create worktrees for each agent
+    agent_workspaces = []
+    for i in range(agent_count):
+        agent_id = i + 1
+        if git_initialized:
+            worktree_path, branch_name = create_agent_worktree(run_dir_rel, agent_id)
+        else:
+            # Fallback without git
+            worktree_path = os.path.join(run_dir_rel, f"agent-{agent_id}")
+            os.makedirs(os.path.join(WORKSPACE_LOCAL, worktree_path), exist_ok=True)
+            branch_name = f"agent-{agent_id}"
+
+        agent_workspaces.append({
+            "agent_id": agent_id,
+            "worktree_path": worktree_path,
+            "branch_name": branch_name,
+            # Path for docker run -v (host path)
+            "docker_path": os.path.join(WORKSPACE_PATH, worktree_path)
+        })
+
+    return {
+        "run_id": run_id,
+        "run_dir": run_dir_rel,
+        "git_initialized": git_initialized,
+        "agent_workspaces": agent_workspaces
+    }
+
+
+def create_agent_prompt(original_prompt: str, agent_workspace: Dict[str, Any]) -> str:
+    """
+    Create an enhanced prompt for an agent with git commit instructions.
+
+    Args:
+        original_prompt: The original user prompt
+        agent_workspace: Workspace info for this agent
+
+    Returns:
+        Enhanced prompt with system instructions
+    """
+    agent_id = agent_workspace["agent_id"]
+    branch_name = agent_workspace["branch_name"]
+
+    system_instructions = f"""
+## IMPORTANT: Workspace and Git Instructions
+
+You are Agent {agent_id} working on branch `{branch_name}`.
+
+**Your working directory is: /workspace**
+
+All files you create should be placed in /workspace.
+
+**CRITICAL: At the end of your work, you MUST commit all your changes:**
+
+1. Stage all your changes:
+   ```bash
+   git add -A
+   ```
+
+2. Commit with a descriptive message:
+   ```bash
+   git commit -m "Agent {agent_id}: <brief description of what you implemented>"
+   ```
+
+Make sure to commit ALL files you created or modified before finishing.
+
+---
+
+## Your Task:
+
+{original_prompt}
+"""
+
+    return system_instructions
+
+
+def get_mcp_options_for_agent(agent_workspace: Dict[str, Any]) -> ClaudeAgentOptions:
+    """
+    Create ClaudeAgentOptions with MCP server configuration for a specific agent.
+
+    Args:
+        agent_workspace: Workspace configuration for this agent
+
+    Returns:
+        ClaudeAgentOptions configured for the agent's worktree
+    """
+    docker_path = agent_workspace["docker_path"]
+
+    return ClaudeAgentOptions(
+        mcp_servers={
+            "claude-code-docker": {
+                "type": "stdio",
+                "command": "docker",
+                "args": [
+                    "run", "-i", "--rm",
+                    "-v", f"{docker_path}:/workspace",
+                    DOCKER_MCP_IMAGE,
+                    "claude", "mcp", "serve"
+                ],
+                "env": {
+                    "ANTHROPIC_API_KEY": ANTHROPIC_API_KEY
+                }
+            }
+        },
+        allowed_tools=["mcp__claude-code-docker__*"]
+    )
+
+
 def get_mcp_options() -> ClaudeAgentOptions:
     """
-    Create ClaudeAgentOptions with MCP server configuration.
+    Create ClaudeAgentOptions with MCP server configuration (legacy, uses root workspace).
     """
     return ClaudeAgentOptions(
         mcp_servers={
@@ -154,13 +421,14 @@ def get_mcp_options() -> ClaudeAgentOptions:
     )
 
 
-async def run_agent(agent_id: int, prompt: str) -> Dict[str, Any]:
+async def run_agent(agent_id: int, prompt: str, agent_workspace: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Run a single Claude agent with the given prompt.
 
     Args:
         agent_id: Identifier for this agent instance
         prompt: The prompt to send to the agent
+        agent_workspace: Optional workspace configuration for git workflow
 
     Returns:
         Dictionary with agent results
@@ -173,6 +441,13 @@ async def run_agent(agent_id: int, prompt: str) -> Dict[str, Any]:
         "output": "",
         "messages": []
     }
+
+    # Add workspace info to result if available
+    if agent_workspace:
+        result["workspace"] = {
+            "worktree_path": agent_workspace.get("worktree_path"),
+            "branch_name": agent_workspace.get("branch_name")
+        }
 
     # Pre-flight check: verify Docker is available
     docker_check = check_docker_available()
@@ -191,8 +466,14 @@ async def run_agent(agent_id: int, prompt: str) -> Dict[str, Any]:
         return result
 
     try:
-        options = get_mcp_options()
-        logger.info(f"Agent {agent_id}: MCP options configured - image: {DOCKER_MCP_IMAGE}, workspace: {WORKSPACE_PATH}")
+        # Use agent-specific workspace if provided, otherwise use default
+        if agent_workspace:
+            options = get_mcp_options_for_agent(agent_workspace)
+            workspace_path = agent_workspace["docker_path"]
+        else:
+            options = get_mcp_options()
+            workspace_path = WORKSPACE_PATH
+        logger.info(f"Agent {agent_id}: MCP options configured - image: {DOCKER_MCP_IMAGE}, workspace: {workspace_path}")
 
         async for message in query(prompt=prompt, options=options):
             # Log message type for debugging
@@ -223,24 +504,33 @@ async def run_agent(agent_id: int, prompt: str) -> Dict[str, Any]:
     return result
 
 
-async def orchestrate_agents(prompt: str, agent_count: int) -> List[Dict[str, Any]]:
+async def orchestrate_agents(prompt: str, agent_count: int) -> Dict[str, Any]:
     """
     Orchestrate multiple agents to work on the same prompt concurrently.
+
+    Sets up a git repository with worktrees for each agent and adds
+    commit instructions to their prompts.
 
     Args:
         prompt: The prompt to send to all agents
         agent_count: Number of agents to spawn
 
     Returns:
-        List of results from all agents
+        Dictionary with run info and results from all agents
     """
     logger.info(f"Orchestrating {agent_count} agents for prompt: {prompt[:50]}...")
 
-    # Create tasks for all agents
-    tasks = [
-        run_agent(i + 1, prompt)
-        for i in range(agent_count)
-    ]
+    # Set up the run environment with git repo and worktrees
+    run_env = setup_run_environment(agent_count)
+    logger.info(f"Created run environment: {run_env['run_id']} with {len(run_env['agent_workspaces'])} worktrees")
+
+    # Create tasks for all agents with their specific workspaces and enhanced prompts
+    tasks = []
+    for agent_ws in run_env["agent_workspaces"]:
+        agent_id = agent_ws["agent_id"]
+        # Create enhanced prompt with git commit instructions
+        enhanced_prompt = create_agent_prompt(prompt, agent_ws)
+        tasks.append(run_agent(agent_id, enhanced_prompt, agent_ws))
 
     # Run all agents concurrently
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -249,15 +539,27 @@ async def orchestrate_agents(prompt: str, agent_count: int) -> List[Dict[str, An
     processed_results = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
+            agent_ws = run_env["agent_workspaces"][i]
             processed_results.append({
-                "agent_id": i + 1,
+                "agent_id": agent_ws["agent_id"],
                 "status": "error",
-                "error": str(result)
+                "error": str(result),
+                "workspace": {
+                    "worktree_path": agent_ws["worktree_path"],
+                    "branch_name": agent_ws["branch_name"]
+                }
             })
         else:
             processed_results.append(result)
 
-    return processed_results
+    return {
+        "run_info": {
+            "run_id": run_env["run_id"],
+            "run_dir": run_env["run_dir"],
+            "git_initialized": run_env["git_initialized"]
+        },
+        "results": processed_results
+    }
 
 
 @app.route("/orchestrate", methods=["POST"])
@@ -265,6 +567,9 @@ def orchestrate():
     """
     Handle orchestration requests from the frontend.
     Expects JSON body with 'prompt' and 'agent_count'.
+
+    Creates a git repository for the run with a worktree per agent.
+    Each agent gets instructions to commit their changes to their branch.
     """
     try:
         data = request.get_json()
@@ -286,11 +591,15 @@ def orchestrate():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            results = loop.run_until_complete(
+            orchestration_result = loop.run_until_complete(
                 orchestrate_agents(prompt, agent_count)
             )
         finally:
             loop.close()
+
+        # Extract results from the orchestration
+        results = orchestration_result["results"]
+        run_info = orchestration_result["run_info"]
 
         # Count successes and failures
         success_count = sum(1 for r in results if r.get("status") == "success")
@@ -298,6 +607,7 @@ def orchestrate():
 
         return jsonify({
             "status": "completed",
+            "run_info": run_info,
             "summary": {
                 "total_agents": agent_count,
                 "successful": success_count,
