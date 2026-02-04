@@ -68,7 +68,7 @@ app = Flask(__name__)
 # Configuration from environment
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 # WORKSPACE_PATH is the path on the Docker host (Minikube node) used for docker run -v
-WORKSPACE_PATH = os.getenv("WORKSPACE_PATH", "/data/claude-workspace")
+WORKSPACE_PATH = os.getenv("WORKSPACE_PATH", "/mnt/claude-workspace")
 # WORKSPACE_LOCAL is where the workspace is mounted inside this container
 WORKSPACE_LOCAL = os.getenv("WORKSPACE_LOCAL", "/workspace")
 DOCKER_MCP_IMAGE = os.getenv("DOCKER_MCP_IMAGE", "claude-mcp:latest")

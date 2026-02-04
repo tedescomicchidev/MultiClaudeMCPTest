@@ -34,5 +34,5 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: standard
   hostPath:
-    path: /data/claude-workspace
+    path: $HOME/code/minikube-storage
     type: DirectoryOrCreate

@@ -100,7 +100,7 @@ spec:
         # 2. Docker containers spawned by 'docker run' (same Docker host)
         - name: workspace
           hostPath:
-            path: /data/claude-workspace
+            path: $HOME/code/minikube-storage
             type: DirectoryOrCreate
         - name: mcp-settings
           configMap:

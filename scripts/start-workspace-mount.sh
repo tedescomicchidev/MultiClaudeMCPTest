@@ -10,7 +10,7 @@ echo "=========================================="
 
 # Configuration
 HOST_WORKSPACE="${HOST_WORKSPACE:-$HOME/claude-workspace}"
-MINIKUBE_WORKSPACE="/data/claude-workspace"
+MINIKUBE_WORKSPACE="/mnt/claude-workspace"
 
 # Create host workspace directory
 echo "Creating host workspace directory: $HOST_WORKSPACE"
