@@ -16,4 +16,4 @@ data:
   DOCKER_HOST_WORKSPACE: "/tmp/claude-workspace"
 
   # Path inside Minikube node - mapped via minikube mount
-  MINIKUBE_WORKSPACE: "/data/claude-workspace"
+  MINIKUBE_WORKSPACE: "/mnt/claude-workspace"

@@ -34,5 +34,5 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: standard
   hostPath:
-    path: /data/claude-workspace
+    path: /mnt/claude-workspace
     type: DirectoryOrCreate
